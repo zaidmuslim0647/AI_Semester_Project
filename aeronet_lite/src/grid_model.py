@@ -105,16 +105,17 @@ def make_sample_grid() -> List[List[Cell]]:
         grid[4][c].density = 1500
         grid[4][c].cost = 0.8
 
-    # Residential cluster around hub (2,2) — within 3 cells (R2)
+    # Residential cluster around hub (2,2) — every cell within Manhattan 3 (R2)
     residential_cells = [
-        (0, 0), (0, 1), (0, 2),
-        (1, 0), (1, 1), (1, 2),
+        (0, 1), (0, 2), (0, 3),
+        (1, 0), (1, 1), (1, 2), (1, 3),
         (2, 0), (2, 1),
         (3, 0), (3, 1), (3, 2), (3, 3),
-        (5, 5), (5, 6), (5, 7),
-        (6, 5), (6, 6), (6, 7), (6, 8),
-        (7, 5), (7, 8),
-        (8, 6), (8, 7), (8, 8),
+        # Cluster around hub (7,7) — every cell within Manhattan 3
+        (5, 6), (5, 7), (5, 8),
+        (6, 5), (6, 6), (6, 7), (6, 8), (6, 9),
+        (7, 5), (7, 8), (7, 9),
+        (8, 6), (8, 7), (8, 8), (8, 9),
     ]
     for (r, c) in residential_cells:
         grid[r][c].zone = "Residential"
