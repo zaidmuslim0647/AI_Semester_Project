@@ -230,17 +230,49 @@ def _plan_route_for_assignment(state: SimState, delivery: Delivery, drone: Drone
     drone.status = "delivering"
 
 
-def _advance_drone(drone: Drone, route: List[Coord]) -> None:
-    """Move drone one step along its route. Returns when route complete."""
-    try:
-        idx = route.index(drone.position)
-    except ValueError:
-        idx = 0
-    if idx + 1 < len(route):
-        drone.position = route[idx + 1]
-        drone.battery = max(0.0, drone.battery - 1.5)
-    else:
+def _advance_drone(state: SimState, drone: Drone, log: Optional["EventLog"] = None,
+                   step: Optional[int] = None) -> bool:
+    """Move drone one step along its route. Pops the next cell off the route.
+
+    Routes can revisit cells (e.g., return leg passes through hub area), so we
+    treat the route as a queue rather than searching by current position.
+    """
+    route = state.routes.get(drone.id, [])
+    # Skip leading entries that are the drone's current position (start of segment).
+    while route and route[0] == drone.position:
+        route.pop(0)
+    if not route:
+        if drone.status == "delivering":
+            delivery_id = next((did for did, drid in state.assignments.items()
+                                if drid == drone.id and did not in state.completed), None)
+            if delivery_id:
+                state.completed.append(delivery_id)
+                if log is not None and step is not None:
+                    log.log(step, f"Drone {drone.id} completed delivery {delivery_id}.")
         drone.status = "idle"
+        return False
+    drone.position = route.pop(0)
+    drone.current_route = route
+    drone.battery = max(0.0, drone.battery - 1.5)
+    return True
+
+
+def _advance_all(state: SimState, log: "EventLog", step: int, verbose: bool = True) -> None:
+    """Move every active drone by one step and log compactly."""
+    moved = []
+    for drone in state.drones:
+        if drone.status not in ("delivering", "returning"):
+            continue
+        # Detect newly activated no-fly on the path; reroute first
+        if _route_crosses_no_fly(state.routes.get(drone.id, []), state.grid):
+            log.log(step, f"Drone {drone.id} route crosses no-fly cell. Replanning.")
+            _reroute(state, drone, log, step)
+            continue
+        if _advance_drone(state, drone, log, step):
+            moved.append((drone.id, drone.position, drone.battery))
+    if verbose and moved:
+        positions = ", ".join(f"{d}@{p}" for d, p, _ in moved)
+        log.log(step, f"Drones moved: {positions}")
 
 
 def _route_crosses_no_fly(route: List[Coord], grid: List[List[Cell]]) -> bool:
@@ -322,14 +354,10 @@ def run_simulation(verbose: bool = True) -> SimState:
         log.log(6, f"Route planned for Drone {drone_id} -> Delivery {delivery_id} "
                    f"(length {len(state.routes.get(drone_id, []))}).")
 
-    # Steps 7-10: Move drones
+    # Steps 7-10: Move drones along planned paths
     for step in range(7, 11):
         log.header(step)
-        for drone in state.drones:
-            if drone.status == "delivering":
-                route = state.routes.get(drone.id, [])
-                _advance_drone(drone, route)
-                log.log(step, f"Drone {drone.id} now at {drone.position}, battery {drone.battery:.1f}%.")
+        _advance_all(state, log, step)
 
     # Step 11: Activate a no-fly cell
     log.header(11)
@@ -337,19 +365,10 @@ def run_simulation(verbose: bool = True) -> SimState:
     state.grid[no_fly_cell[0]][no_fly_cell[1]].no_fly = True
     log.log(11, f"No-fly cell activated at {no_fly_cell}.")
 
-    # Steps 12-14: Detect & reroute
+    # Steps 12-14: Detect & reroute (movement also continues)
     for step in range(12, 15):
         log.header(step)
-        for drone in state.drones:
-            if drone.status != "delivering":
-                continue
-            route_remainder = state.routes.get(drone.id, [])
-            if _route_crosses_no_fly(route_remainder, state.grid):
-                log.log(step, f"Drone {drone.id} route crosses no-fly cell. Replanning.")
-                _reroute(state, drone, log, step)
-            else:
-                _advance_drone(drone, state.routes.get(drone.id, []))
-                log.log(step, f"Drone {drone.id} now at {drone.position}.")
+        _advance_all(state, log, step)
 
     # Steps 15-17: Demand forecast nudge + optional extra delivery
     for step in range(15, 18):
@@ -368,19 +387,22 @@ def run_simulation(verbose: bool = True) -> SimState:
             log.log(16, f"Extra delivery {extra.id} added based on forecast (drop {extra_dropoff}).")
         else:
             log.log(17, "Forecast accepted; fleet capacity sufficient.")
+        _advance_all(state, log, step)
 
     # Step 18: Anomaly check
     log.header(18)
+    anomaly_labels: Dict[str, str] = {}
     for drone in state.drones:
         label = predict_anomaly(drone, step=18)
+        anomaly_labels[drone.id] = label
         if label != "Normal":
             log.log(18, f"{label} anomaly detected for Drone {drone.id}.")
+    _advance_all(state, log, 18)
 
-    # Step 19: React to anomaly (force return to hub for any failed drone)
+    # Step 19: React to critical anomalies (force return to hub on Battery)
     log.header(19)
     for drone in state.drones:
-        label = predict_anomaly(drone, step=18)
-        if label == "Battery":
+        if anomaly_labels.get(drone.id) == "Battery":
             drone.status = "returning"
             result = astar(drone.position, drone.home_hub, state.grid)
             if result["success"]:
@@ -390,15 +412,18 @@ def run_simulation(verbose: bool = True) -> SimState:
             else:
                 drone.status = "failed"
                 log.log(19, f"Drone {drone.id} cannot return to hub: {result['reason']}.")
+    _advance_all(state, log, 19)
 
     # Step 20: Final summary
     log.header(20)
-    completed = sum(1 for d in state.drones if d.status == "idle")
+    completed_count = len(state.completed)
     delivering = sum(1 for d in state.drones if d.status == "delivering")
+    idle = sum(1 for d in state.drones if d.status == "idle")
     failed = sum(1 for d in state.drones if d.status == "failed")
     returning = sum(1 for d in state.drones if d.status == "returning")
-    log.log(20, f"Simulation complete. drones idle/done={completed} "
-                f"delivering={delivering} returning={returning} failed={failed}.")
+    delayed = sum(1 for d in state.drones if d.status == "delivering")  # still in flight
+    log.log(20, f"Simulation complete. completed={completed_count} delayed={delayed} "
+                f"failed={failed} (drones idle={idle} returning={returning}).")
 
     print("\n" + "=" * 64)
     print(f"Total events logged: {len(log.entries)}")

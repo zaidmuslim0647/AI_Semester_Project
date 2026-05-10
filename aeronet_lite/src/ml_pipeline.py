@@ -276,5 +276,42 @@ class SyntheticAnomalyGenerator:
         
         if speed_jump > SPEED_JUMP_THRESHOLD or altitude_jump > ALTITUDE_JUMP_THRESHOLD:
             return "Sensor"
-        
+
         return "Normal"
+
+
+# --------------------------------------------------------------------------- #
+# Top-level adapter functions matching the Day-1 contract used by main.py.
+# These wrap the class-based API above so the orchestrator can call them
+# directly without needing to know about loaders.
+# --------------------------------------------------------------------------- #
+
+_ANOMALY_CACHE: Optional[Dict[str, List[AnomalyPrediction]]] = None
+
+
+def load_demand_forecast(grid) -> Dict[Tuple[int, int], float]:
+    """Return predicted demand keyed by (row, col), reading Saad's CSV.
+
+    Falls back to a zero-demand grid if the CSV is missing.
+    """
+    forecast = DemandForecastLoader.load_from_csv()
+    n_rows = forecast.demand_grid.shape[0]
+    n_cols = forecast.demand_grid.shape[1]
+    return {
+        (r, c): float(forecast.demand_grid[r, c])
+        for r in range(n_rows)
+        for c in range(n_cols)
+    }
+
+
+def predict_anomaly(drone, step: int) -> str:
+    """Look up the predicted anomaly label for a drone at a given step.
+
+    Loads anomaly_predictions.csv on first call and caches the result.
+    """
+    global _ANOMALY_CACHE
+    if _ANOMALY_CACHE is None:
+        _ANOMALY_CACHE = AnomalyClassifierLoader.load_from_csv()
+    return AnomalyClassifierLoader.get_label_for_drone_step(
+        _ANOMALY_CACHE, drone.id, step
+    )
