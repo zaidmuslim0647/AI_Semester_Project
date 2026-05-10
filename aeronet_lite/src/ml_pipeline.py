@@ -184,8 +184,10 @@ class AnomalyClassifierLoader:
         if csv_path is None:
             csv_path = DATA_DIR / "anomaly_predictions.csv"
         
+        csv_path = Path(csv_path)
+        
         # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
         
         with open(csv_path, 'w', newline='') as f:
             writer = csv.DictWriter(
