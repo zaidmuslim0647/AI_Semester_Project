@@ -175,7 +175,9 @@ def plot_demand_heatmap(
     fig.tight_layout()
     
     if save_path:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        save_dir = os.path.dirname(save_path)
+        if save_dir:
+            os.makedirs(save_dir, exist_ok=True)
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
     if show:
         plt.show()
