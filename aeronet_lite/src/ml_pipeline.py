@@ -102,10 +102,13 @@ class DemandForecastLoader:
         if csv_path is None:
             csv_path = DATA_DIR / "demand_forecast.csv"
         
-        # Create directory if it doesn't exist
-        os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+        output_path = Path(csv_path)
         
-        with open(csv_path, 'w', newline='') as f:
+        # Create the parent directory when the output path includes one.
+        if output_path.parent != Path("."):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(output_path, 'w', newline='') as f:
             writer = csv.DictWriter(f, fieldnames=['row', 'col', 'predicted_demand'])
             writer.writeheader()
             for r in range(demand_grid.shape[0]):
