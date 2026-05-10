@@ -219,6 +219,8 @@ def plot_anomaly_timeline(
         if save_path:
             os.makedirs(os.path.dirname(save_path), exist_ok=True)
             fig.savefig(save_path, dpi=150, bbox_inches="tight")
+        if show:
+            plt.show()
         return fig
     
     # Extract data
