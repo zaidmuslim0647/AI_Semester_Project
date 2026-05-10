@@ -1,2 +1,9 @@
 .claude/
 BSDS-SemesterProject-AI-SP2026.docx.md
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+aeronet_lite/data/raw/*
+!aeronet_lite/data/raw/.gitkeep
+aeronet_lite/data/processed/*
+!aeronet_lite/data/processed/.gitkeep
