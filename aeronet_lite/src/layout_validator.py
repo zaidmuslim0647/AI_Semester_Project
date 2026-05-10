@@ -1,7 +1,10 @@
 """CSP-style layout validator for AeroNet Lite (Module 1).
 
-Owner: Zaid. Day 3 ships R1 (industrial adjacency) and R2 (residential coverage).
-Day 4 will add R3 (hub charging proximity) and R4 (hospital medical pickup access).
+Owner: Zaid. Implements all four rules from the spec:
+  R1 — Industrial adjacency
+  R2 — Residential coverage by hubs
+  R3 — Hub charging proximity
+  R4 — Hospital medical pickup access
 
 Each rule returns a list of Violation objects. Violations include a suggested fix
 so the report is useful during viva.
@@ -16,10 +19,12 @@ from grid_model import (
     Cell,
     Coord,
     GRID_SIZE,
+    charging_pads,
     get_neighbors,
     hubs,
     make_sample_grid,
     manhattan,
+    medical_pickups,
     print_grid,
 )
 
@@ -149,12 +154,115 @@ def check_residential_coverage(grid: List[List[Cell]]) -> List[Violation]:
     return violations
 
 
+# ---------- Rule R3: Hub-to-charging-pad proximity ------------------------- #
+
+R3_DESCRIPTION = "Every Drone Hub must have a Charging Pad within 2 Manhattan cells."
+R3_MAX_DISTANCE = 2
+
+
+def check_hub_charging(grid: List[List[Cell]]) -> List[Violation]:
+    violations: List[Violation] = []
+    pad_coords = [(p.row, p.col) for p in charging_pads(grid)]
+
+    for hub in hubs(grid):
+        origin = (hub.row, hub.col)
+        if not pad_coords:
+            violations.append(
+                Violation(
+                    rule_id="R3",
+                    cell=origin,
+                    message=f"Hub {origin} has no charging pad anywhere on the grid.",
+                    suggestion=f"Place a charging pad within {R3_MAX_DISTANCE} cells of {origin}.",
+                )
+            )
+            continue
+
+        distances = [manhattan(origin, p) for p in pad_coords]
+        nearest = min(distances)
+        if nearest > R3_MAX_DISTANCE:
+            nearest_pad = pad_coords[distances.index(nearest)]
+            violations.append(
+                Violation(
+                    rule_id="R3",
+                    cell=origin,
+                    message=(
+                        f"Hub {origin} is {nearest} cells from the nearest charging pad "
+                        f"{nearest_pad} (limit is {R3_MAX_DISTANCE})."
+                    ),
+                    suggestion=(
+                        f"Add a charging pad within {R3_MAX_DISTANCE} cells of {origin}."
+                    ),
+                )
+            )
+    return violations
+
+
+# ---------- Rule R4: Hospital medical-pickup access ------------------------ #
+
+R4_DESCRIPTION = "At least one Hospital must have a Medical Pickup point within 1 cell."
+R4_MAX_DISTANCE = 1
+
+
+def check_medical_access(grid: List[List[Cell]]) -> List[Violation]:
+    violations: List[Violation] = []
+    hospital_cells = [c for row in grid for c in row if c.zone == "Hospital"]
+    pickup_coords = [(p.row, p.col) for p in medical_pickups(grid)]
+
+    if not hospital_cells:
+        return violations  # No hospitals -> rule trivially satisfied
+
+    if not pickup_coords:
+        first = (hospital_cells[0].row, hospital_cells[0].col)
+        violations.append(
+            Violation(
+                rule_id="R4",
+                cell=first,
+                message="Grid has hospitals but no Medical Pickup points anywhere.",
+                suggestion=f"Place a Medical Pickup within {R4_MAX_DISTANCE} cell of any hospital.",
+            )
+        )
+        return violations
+
+    # Rule: at least ONE hospital must satisfy. Report only if all fail.
+    any_satisfied = False
+    for hosp in hospital_cells:
+        origin = (hosp.row, hosp.col)
+        nearest = min(manhattan(origin, p) for p in pickup_coords)
+        if nearest <= R4_MAX_DISTANCE:
+            any_satisfied = True
+            break
+
+    if not any_satisfied:
+        # Report against the first hospital with a clear suggestion.
+        hosp = hospital_cells[0]
+        origin = (hosp.row, hosp.col)
+        nearest = min(manhattan(origin, p) for p in pickup_coords)
+        nearest_pickup = pickup_coords[
+            [manhattan(origin, p) for p in pickup_coords].index(nearest)
+        ]
+        violations.append(
+            Violation(
+                rule_id="R4",
+                cell=origin,
+                message=(
+                    f"No hospital has a Medical Pickup within {R4_MAX_DISTANCE} cell. "
+                    f"Closest pair: hospital {origin} <-> pickup {nearest_pickup} ({nearest} cells)."
+                ),
+                suggestion=(
+                    f"Add a Medical Pickup adjacent to a hospital (e.g. next to {origin})."
+                ),
+            )
+        )
+    return violations
+
+
 # ---------- Aggregator ----------------------------------------------------- #
 
-# Rules implemented so far. Day 4 will append R3 and R4.
 REGISTERED_RULES: List[Tuple[str, str, Callable[[List[List[Cell]]], List[Violation]]]] = [
     ("R1", R1_DESCRIPTION, check_industrial_safety),
     ("R2", R2_DESCRIPTION, check_residential_coverage),
+    ("R3", R3_DESCRIPTION, check_hub_charging),
+    ("R4", R4_DESCRIPTION, check_medical_access),
 ]
 
 
@@ -168,14 +276,18 @@ def validate_layout(grid: List[List[Cell]]) -> ValidationReport:
 # ---------- Demo ----------------------------------------------------------- #
 
 def _demo_violation_grid() -> List[List[Cell]]:
-    """Sample grid with intentional R1 and R2 failures for the demo run."""
+    """Sample grid with intentional violations of every rule for demo output."""
     grid = make_sample_grid()
-    # Force an R1 violation: drop a School next to the industrial cell at (5, 0)
+    # R1 violation: drop a School next to the industrial cell at (5, 0)
     grid[5][1].zone = "School"
     grid[5][1].density = 500
-    # Force an R2 violation: residential cell far from both hubs (2,2) and (7,7)
+    # R2 violation: residential cell far from both hubs (2,2) and (7,7)
     grid[9][9].zone = "Residential"
     grid[9][9].density = 4500
+    # R3 violation: remove the charging pad next to hub (7,7)
+    grid[7][6].is_charging = False
+    # R4 violation: remove the medical pickup next to the hospital
+    grid[1][9].is_medical_pickup = False
     return grid
 
 
