@@ -270,7 +270,11 @@ def activate_no_fly(state: dict, row: int, col: int) -> dict:
                 state["delayed"].append(delivery.id)
             state["waypoints"].pop(drone_id, None)
 
+            # The drone is physically at this cell so allow it to start moving
+            # out: temporarily lift the flag just for the astar call.
+            state["grid"][row][col].no_fly = False
             result = astar(drone.position, drone.home_hub, state["grid"])
+            state["grid"][row][col].no_fly = True
             if result["success"]:
                 drone.current_route = list(result["path"][1:])
                 drone.status        = "returning"
