@@ -1,6 +1,10 @@
 .claude/
 BSDS-SemesterProject-AI-SP2026.docx.md
-
 BSDS-SemesterProject-AI-SP2026.docx
 __pycache__/
-aeronet_lite/src/__pycache__/grid_model.cpython-312.pyc
+*.pyc
+.ipynb_checkpoints/
+aeronet_lite/data/raw/*
+!aeronet_lite/data/raw/.gitkeep
+aeronet_lite/data/processed/*
+!aeronet_lite/data/processed/.gitkeep
